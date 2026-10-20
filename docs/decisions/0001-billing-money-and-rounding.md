@@ -1,171 +1,196 @@
 # Decision 0001: Billing Money and Rounding
 
-**Status:** Proposed — confirm through implementation tests before treating as final  
-**Date:** 2026-10-20  
-**Scope:** Monetary representation and arithmetic for NurturePatch billing
+## Status
+
+**Accepted for implementation, subject to technical validation and production compliance checks.**
+
+The childminder has confirmed these business rules:
+
+1. Childcare-hour billing follows the applicable family's contract.
+2. Trips, days and meals use whole-number quantities. Fixed-fee services use a quantity of one.
+3. Exact line amounts are summed before the invoice total is rounded once using `ROUND_HALF_UP`.
+4. When displayed line amounts do not add up to the authoritative invoice total, a clearly labelled rounding-adjustment line reconciles the difference.
+
+These decisions do not imply approval of unverified legal, accounting, childcare-funding or local-authority requirements.
 
 ## 1. Context
 
-NurturePatch calculates childcare charges from contracted rates, quantities, additional services, adjustments, payments, and funding records.
+NurturePatch calculates monthly childcare invoices for families with different contractual arrangements and rates. An invoice may include multiple children, contracted hours, additional hours, extra services and permitted adjustments.
 
-Floating-point arithmetic can introduce binary representation errors when handling decimal values. Financial calculations therefore need an explicit representation, precision model, conversion point, and rounding policy.
-
-This decision establishes a proposed baseline for implementation and testing. Any material change to the policy must be documented and reviewed.
+Calculations must be deterministic, auditable and testable. The invoice must show a consistent total, and its issued version must remain unchanged even if rates or other records subsequently change.
 
 ## 2. Monetary representation
 
-**Decision:** Store monetary amounts as integer pence.
+- Use GBP as the initial currency.
+- Store authoritative payable monetary amounts as integer pence.
+- Use Python `Decimal` for intermediate monetary calculations.
+- Never use binary floating-point arithmetic for currency calculations.
+- Parse monetary inputs from strings or other exact representations, not binary floats.
+- Define and enforce appropriate numeric precision and range limits before accepting production inputs.
 
-Examples:
+Integer pence provides reliable storage and comparison of payable amounts. `Decimal` supports exact intermediate calculations where amounts may contain fractions of a penny.
 
-| Amount | Stored value |
+## 3. Quantity and rate rules
+
+### Childcare hours
+
+- Apply the billing rules specified by the relevant family's contract.
+- Do not assume a universal rule for partial hours, billing increments or minimum bookings.
+- Validate quantities against the applicable contract and documented system limits.
+
+### Additional services
+
+- Trips, days and meals use whole-number quantities.
+- Fixed-fee services use a quantity of one.
+- Each service line records its description, quantity, unit, applicable rate and calculation inputs.
+- Rates must reflect the applicable family agreement or other authorised pricing arrangement.
+
+### Adjustments and missed hours
+
+- Adjustments must have a defined type, amount and recorded reason.
+- Missed-hour deductions are permitted only when the applicable contract allows them and the required reason and supporting evidence are recorded.
+- Do not automatically deduct charges for missed hours.
+- Validate adjustment permissions and amounts against documented business rules.
+- Correct issued invoices through an authorised correction or credit-note process, not by silently changing the original invoice.
+
+## 4. Rounding policy
+
+The confirmed business rule is **aggregate-first rounding**.
+
+1. Calculate each invoice line using exact intermediate values.
+2. Sum the exact line amounts without first rounding each line to integer pence.
+3. Apply `ROUND_HALF_UP` once to the aggregate invoice amount, at two decimal places in GBP.
+4. Convert the final rounded invoice total to integer pence.
+5. Use that integer-pence amount as the authoritative invoice total.
+
+Do not replace this policy with line-by-line rounding before aggregation.
+
+### Example
+
+Two lines each calculate to £1.005.
+
+- Exact aggregate: £1.005 + £1.005 = £2.010.
+- Rounded invoice total: £2.01.
+- Authoritative invoice total: 201 pence.
+
+This example illustrates the rounding rule; it does not define a general childcare rate or quantity.
+
+## 5. Displayed line amounts and rounding adjustment
+
+Customer-facing invoice line amounts are displayed to two decimal places.
+
+Because each displayed line may be rounded independently for presentation, their displayed sum can differ from the authoritative aggregate-first total. NurturePatch must reconcile this difference transparently.
+
+Calculate the adjustment in integer pence:
+
+`rounding adjustment = authoritative invoice total − sum of displayed line amounts`
+
+For example:
+
+| Invoice line | Amount |
 |---|---:|
-| £0.01 | 1 |
-| £12.34 | 1234 |
-| £100.00 | 10000 |
+| Service line 1 | £1.01 |
+| Service line 2 | £1.01 |
+| Rounding adjustment | −£0.01 |
+| **Invoice total** | **£2.01** |
 
-Rules:
+Implementation requirements:
 
-- Monetary amounts persisted in the database and exposed in internal financial records use integer pence.
-- Do not use binary floating-point types for currency calculations.
-- API and document formatting must distinguish the stored integer from its display representation. For example, `1234` pence is displayed as `£12.34`.
-- Currency is GBP for the initial England-focused product. Multi-currency support is outside the initial scope.
-- Validate permitted ranges and signs at the relevant business boundary. Negative values must only be permitted for explicitly defined operations, such as an authorised credit or reversal.
+- Display a clearly labelled rounding-adjustment line only when the difference is non-zero.
+- Ensure the displayed line amounts plus the adjustment equal the authoritative invoice total exactly.
+- Do not alter the underlying exact line calculations to manufacture the reconciliation.
+- Do not use the adjustment to conceal pricing errors, unauthorised discounts or incorrect calculations.
+- Preserve the adjustment and the displayed invoice values in the issued invoice snapshot.
+- Test both positive and negative differences where valid.
 
-## 3. Quantities, rates, and intermediate calculations
+The adjustment is a presentation and reconciliation mechanism. It does not replace the aggregate-first rounding policy or change the underlying contractual charges.
 
-**Proposed approach:** Use Python `Decimal` for decimal inputs, rates where necessary, and intermediate arithmetic. Convert final monetary results to integer pence using the rounding policy in this document.
+## 6. Calculation and auditability
 
-Rationale:
+The calculation service must be independent of the web API, database and cloud infrastructure.
 
-- Decimal arithmetic avoids the binary representation issues associated with `float`.
-- Integer pence provides a consistent representation for stored financial amounts.
-- Keeping intermediate arithmetic precise allows quantities such as fractional hours to be handled without prematurely rounding every operation to a penny.
+For each calculation, retain sufficient information to explain and reproduce the result, including:
 
-Rules:
+- The relevant quantity, unit and rate inputs.
+- The applicable service or charge description.
+- The calculation result before final invoice rounding.
+- Permitted adjustment details and recorded reasons.
+- The aggregate exact amount, rounding method and authoritative rounded total.
+- The displayed line amounts and any rounding adjustment.
 
-- Do not convert a binary floating-point value into a monetary calculation and assume the original decimal value has been preserved.
-- Parse decimal inputs from strings or other exact decimal representations where practical.
-- Define the supported precision for each quantity type before implementing the corresponding feature.
-- Validate quantities against their business rules; do not assume all services use the same unit or precision.
-- Keep calculations deterministic: the same validated inputs and policy must produce the same result.
+The implementation must define a safe, consistent representation for intermediate values that may contain fractions of a penny, while retaining integer-pence values for authoritative payable amounts.
 
-## 4. Quantity precision
+Issued invoices must preserve their original calculation and display snapshots. Subsequent payments affect the balance due, not the original issued invoice total. Corrections must follow the authorised correction process.
 
-Quantity precision must be defined by the relevant business rule, not chosen implicitly by a programming language or database default.
+## 7. Invoice totals and payments
 
-The initial design must support documenting:
+- Derive invoice totals from validated calculation inputs and exact line amounts.
+- Round the aggregate once using the policy in Section 4.
+- Reconcile displayed amounts according to Section 5.
+- Calculate outstanding balances using the authoritative invoice total and valid payment allocations.
+- Reject allocations that exceed the applicable amount available for allocation.
+- Record only confirmed payments as received.
+- Keep childcare-funding approval, expected funding and received funding distinct.
+- Do not treat a funding approval as evidence that funds have been received.
 
-- **Time-based charges:** the permitted precision for hours and minutes, including how partial hours are represented.
-- **Session or day-based charges:** whether quantities must be whole units or can be fractional.
-- **Fixed-fee services:** the applicable unit and whether a quantity other than one is allowed.
-- **Adjustments and credits:** the permitted input precision and validation rules.
+Payment allocations, receipts and funding reconciliation must not silently rewrite an issued invoice.
 
-**Open decision:** Confirm the required quantity precision with the childminder before finalising billing behaviour. Do not assume that all hourly charges can be rounded to the nearest whole hour or that all fractional hours are billed in the same way.
+## 8. Validation and error handling
 
-## 5. Rounding policy
+Reject invalid or unsupported inputs, including:
 
-**Proposed policy:** Use decimal arithmetic for intermediate calculations and round each invoice line's calculated amount to the nearest whole penny using the `ROUND_HALF_UP` rule. Calculate the invoice total by summing the rounded integer-pence line amounts.
+- Negative or otherwise disallowed quantities.
+- Non-finite numeric values, including `NaN` and infinity.
+- Unsupported service units or quantities that violate service rules.
+- Rates outside documented limits.
+- Invalid adjustment types or unauthorised deductions.
+- Values that exceed defined precision or range limits.
 
-For this rule:
+Validation must distinguish between genuinely invalid inputs and values permitted by the applicable contract. Error messages must be actionable without exposing sensitive information.
 
-- A fractional penny with an absolute value below half a penny rounds towards zero.
-- A fractional penny at or beyond half a penny rounds away from zero.
-- The implementation must use the explicitly configured decimal rounding mode, not a language or library default.
+## 9. Test requirements
 
-Examples:
+Automated tests must cover:
 
-| Calculated line amount | Rounded amount |
-|---|---:|
-| £10.004 | £10.00 |
-| £10.005 | £10.01 |
-| £10.006 | £10.01 |
+- Ordinary hourly and additional-service calculations.
+- Multiple children and different contractual rates.
+- Whole-number quantities for trips, days and meals.
+- Fixed-fee services with quantity one.
+- Permitted adjustments and missed-hour deductions with required evidence.
+- Invalid, non-finite, unsupported and out-of-range inputs.
+- Decimal calculations without binary floating-point currency errors.
+- `ROUND_HALF_UP` at relevant boundaries.
+- Aggregate-first rounding where line-by-line rounding would produce a different result.
+- Conversion of the final rounded total to integer pence.
+- Positive and negative rounding adjustments where valid.
+- No adjustment when displayed lines already reconcile.
+- Displayed lines plus adjustment equalling the authoritative total.
+- Partial payments, split allocations and over-allocation rejection.
+- Issued invoice immutability and correction handling.
+- Funding approval, expected funding, partial receipt and received-funding reconciliation.
 
-These examples illustrate the proposed rounding rule, not actual childcare rates.
+Include documented sample calculations with expected results. Tests must use synthetic data and must not contain real family or financial information.
 
-Rationale:
+## 10. Scope and dependencies
 
-- Rounding each line gives a clear, auditable amount for every invoice line.
-- Summing stored line amounts ensures the displayed invoice total matches the sum of the amounts being billed.
-- Explicit rounding prevents behaviour from depending on an implicit programming-language default.
+This decision supports the billing calculation engine and related invoice functionality. It does not itself implement the API, database, PDF generation, payment processing or cloud deployment.
 
-The chosen line-level rounding rule must be confirmed against the childminder's requirements before production use. If a different policy is needed, update this decision and its tests before implementing billing.
+The calculation service must remain independently testable and must not require HTTP, database or cloud dependencies.
 
-## 6. Conversion to integer pence
+## 11. Remaining implementation and verification work
 
-For each invoice line:
+The childminder-confirmed business rules in this document are settled. The following work remains for implementation and production readiness:
 
-1. Validate the input quantity and rate.
-2. Parse decimal values without introducing binary floating-point currency arithmetic.
-3. Calculate the line amount using decimal arithmetic at the defined precision.
-4. Apply the explicit rounding rule once at the agreed line-total conversion point.
-5. Convert the rounded GBP amount into integer pence.
-6. Store the integer-pence line amount.
-7. Calculate invoice totals by summing the stored line amounts.
+- Define precise numeric limits and input validation rules.
+- Select and document the representation used to retain exact intermediate calculation values.
+- Implement contract-specific hourly and adjustment validation.
+- Confirm applicable accounting, funded-hours and local-authority requirements before production use.
+- Verify the invoice presentation with the childminder before finalising the customer-facing layout.
 
-The implementation must ensure the conversion to pence is exact after rounding. Do not silently truncate fractional pennies or repeatedly round intermediate values without an explicit rule.
+These tasks must be completed or appropriately validated before the relevant functionality is released. They must not silently change the confirmed business rules.
 
-The final implementation must define appropriate decimal precision and validation limits so calculations cannot silently overflow or lose required precision.
+## 12. Decision summary
 
-## 7. Invoice totals and balances
+NurturePatch will use integer pence for authoritative payable amounts and `Decimal` for exact intermediate calculations. It will calculate invoice totals by summing exact line amounts and applying `ROUND_HALF_UP` once to the aggregate. Customer-facing line amounts will be displayed to two decimal places, with a clearly labelled rounding-adjustment line when needed to reconcile them to the authoritative invoice total.
 
-- The invoice total is the sum of its persisted integer-pence line amounts.
-- Any permitted adjustments must have explicit rules and be represented in the invoice records.
-- The outstanding balance is derived from the issued invoice amount and valid payment allocations under the defined correction and allocation rules.
-- Funding expected, approved, or received must not be silently mixed with parent charges or confirmed payments.
-- Any displayed totals must be derived from the authoritative stored monetary values, not independently recalculated using a different rounding method.
-
-## 8. Issued invoices and corrections
-
-- Issuing an invoice creates an immutable snapshot of the billed lines, quantities, rates, rounded line amounts, and invoice total.
-- Later changes to a contract or rate must not change an already issued invoice.
-- Issued invoices must not be silently edited to correct an error.
-- Corrections must use an explicit, auditable correction process, such as a credit note and, where required, a replacement invoice.
-- Corrections must preserve a traceable relationship to the original invoice and must not rewrite historical payment records without an explicit correction or reversal process.
-
-## 9. Required tests
-
-The billing implementation must include tests for:
-
-- Integer-pence representation and display conversion.
-- Exact decimal input handling without binary floating-point currency arithmetic.
-- Values immediately below, exactly at, and immediately above a half-penny boundary.
-- Positive and negative rounding where negative values are permitted.
-- Quantity precision and invalid quantities.
-- Zero values and documented minimum and maximum values.
-- Summation of rounded line amounts into the invoice total.
-- Multiple lines whose individual rounded amounts differ from rounding the aggregate unrounded amount.
-- Partial payments and outstanding balances.
-- Rejection of over-allocation.
-- Immutability of issued invoice snapshots.
-- Corrections that preserve the original financial history.
-- Funding reconciliation that distinguishes approval from cash actually received.
-
-Tests must assert the expected integer-pence results, not merely that the calculation completes.
-
-## 10. Consequences and trade-offs
-
-**Benefits**
-
-- Avoids binary floating-point currency errors.
-- Produces deterministic stored monetary amounts.
-- Makes invoice totals and line amounts auditable.
-- Defines a consistent basis for payment allocation and reconciliation.
-
-**Trade-offs**
-
-- Quantity precision and rounding rules require explicit business decisions.
-- Line-level rounding can produce a different total from rounding the aggregate unrounded value.
-- Changing the policy after invoices have been issued could cause discrepancies, so the policy must be version controlled and applied consistently.
-
-## 11. Outstanding decisions
-
-Before production billing is approved, confirm:
-
-- The required precision and billing increments for time-based charges.
-- The supported quantity precision for other service types.
-- Whether the proposed line-level `ROUND_HALF_UP` rule matches the childminder's invoicing expectations.
-- The treatment of any exceptional adjustments or credits.
-- Any additional accounting or local requirements that affect invoice presentation or funding reconciliation.
-
-These questions must be resolved with the relevant stakeholders and verified requirements; this document does not claim that the proposed policy has already been approved.
+Childcare-hour billing will follow each family's contract. Trips, days and meals will use whole-number quantities, and fixed-fee services will use a quantity of one. Calculation inputs and issued invoice snapshots must remain traceable and auditable.
