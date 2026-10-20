@@ -12,6 +12,7 @@ from app.services.billing import (
     ServiceUnit,
     validate_billing_line,
     calculate_billing_line,
+    calculate_invoice,
 )
 
 
@@ -242,3 +243,87 @@ def test_calculate_billing_line_rejects_invalid_input() -> None:
         match="quantity must be greater than zero",
     ):
         calculate_billing_line(line)
+
+
+
+def test_calculate_invoice_rounds_aggregate_before_reconciling_lines() -> None:
+    """Round the exact invoice subtotal before reconciling displayed lines."""
+    lines = (
+        make_line(
+            description="Child A childcare",
+            quantity=Decimal("1"),
+            unit_rate=Decimal("1.005"),
+            child_id="child-a",
+        ),
+        make_line(
+            description="Child B childcare",
+            quantity=Decimal("1"),
+            unit_rate=Decimal("1.005"),
+            child_id="child-b",
+        ),
+    )
+
+    result = calculate_invoice(lines)
+
+    assert result.exact_subtotal == Decimal("2.010")
+    assert result.total_pence == 201
+    assert [line.displayed_amount_pence for line in result.lines] == [101, 101]
+    assert result.rounding_adjustment_pence == -1
+
+    displayed_total = sum(
+        line.displayed_amount_pence for line in result.lines
+    )
+    assert displayed_total + result.rounding_adjustment_pence == result.total_pence
+
+
+def test_calculate_invoice_sums_different_rates_and_services() -> None:
+    """Calculate an invoice containing different rates and service units."""
+    lines = (
+        make_line(
+            description="Child A contracted childcare",
+            quantity=Decimal("10"),
+            unit_rate=Decimal("5.00"),
+            child_id="child-a",
+        ),
+        make_line(
+            description="Child B additional childcare",
+            line_type=LineType.ADDITIONAL_HOURS,
+            quantity=Decimal("2"),
+            unit_rate=Decimal("8.00"),
+            child_id="child-b",
+        ),
+        make_line(
+            description="Meals",
+            line_type=LineType.SERVICE,
+            quantity=Decimal("3"),
+            unit_rate=Decimal("2.25"),
+            unit="meal",
+            child_id="child-a",
+        ),
+    )
+
+    result = calculate_invoice(lines)
+
+    assert result.exact_subtotal == Decimal("72.75")
+    assert result.total_pence == 7275
+    assert result.rounding_adjustment_pence == 0
+
+
+def test_calculate_invoice_rejects_empty_lines() -> None:
+    """Reject an invoice calculation with no billing lines."""
+    with pytest.raises(
+        BillingError,
+        match="at least one billing line",
+    ):
+        calculate_invoice(())
+
+
+def test_calculate_invoice_rejects_invalid_line() -> None:
+    """Reject an invoice when any billing line is invalid."""
+    lines = (make_line(quantity=Decimal("0")),)
+
+    with pytest.raises(
+        BillingError,
+        match="quantity must be greater than zero",
+    ):
+        calculate_invoice(lines)

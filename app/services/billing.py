@@ -14,6 +14,7 @@ The canonical rationale and rounding examples are documented in
 docs/decisions/0001-billing-money-and-rounding.md.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 from enum import Enum
@@ -227,3 +228,60 @@ def calculate_billing_line(line: BillingLineInput) -> CalculatedLine:
         displayed_amount_pence=displayed_amount_pence,
     )
 
+
+
+def calculate_invoice(
+    lines: Sequence[BillingLineInput],
+) -> InvoiceCalculation:
+    """Calculate an invoice total from its billing lines.
+
+    Sum exact line amounts before rounding the authoritative invoice total.
+    Reconcile displayed line amounts with the total when necessary.
+
+    Args:
+        lines: The billing lines to validate and calculate.
+
+    Returns:
+        The calculated lines, exact subtotal, total in integer pence,
+        and display rounding adjustment in pence.
+
+    Raises:
+        BillingError: If no lines are provided or a line is invalid.
+    """
+    if not isinstance(lines, Sequence) or isinstance(lines, (str, bytes)):
+        raise BillingError("lines must be a sequence of billing lines.")
+
+    if not lines:
+        raise BillingError("invoice must contain at least one billing line.")
+
+    calculated_lines = tuple(
+        calculate_billing_line(line)
+        for line in lines
+    )
+
+    exact_subtotal = sum(
+        (line.exact_amount for line in calculated_lines),
+        start=Decimal("0"),
+    )
+
+    rounded_total = exact_subtotal.quantize(
+        Decimal("0.01"),
+        rounding=ROUND_HALF_UP,
+    )
+    total_pence = int(rounded_total * 100)
+
+    displayed_lines_total_pence = sum(
+        line.displayed_amount_pence
+        for line in calculated_lines
+    )
+
+    rounding_adjustment_pence = (
+        total_pence - displayed_lines_total_pence
+    )
+
+    return InvoiceCalculation(
+        lines=calculated_lines,
+        exact_subtotal=exact_subtotal,
+        total_pence=total_pence,
+        rounding_adjustment_pence=rounding_adjustment_pence,
+    )
