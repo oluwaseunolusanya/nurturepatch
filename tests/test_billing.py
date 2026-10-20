@@ -327,3 +327,35 @@ def test_calculate_invoice_rejects_invalid_line() -> None:
         match="quantity must be greater than zero",
     ):
         calculate_invoice(lines)
+
+
+
+def test_calculate_billing_line_rounds_below_half_penny_down() -> None:
+    """Round an amount below the half-penny boundary down."""
+    line = make_line(
+        quantity=Decimal("1"),
+        unit_rate=Decimal("1.004"),
+    )
+
+    result = calculate_billing_line(line)
+
+    assert result.exact_amount == Decimal("1.004")
+    assert result.displayed_amount_pence == 100
+
+
+def test_calculate_billing_line_rounds_negative_half_up() -> None:
+    """Round a negative half-penny amount away from zero."""
+    line = make_line(
+        line_type=LineType.ADJUSTMENT,
+        quantity=Decimal("1"),
+        unit_rate=Decimal("-1.005"),
+        unit="adjustment",
+        adjustment_reason="Permitted missed-hours deduction",
+        contract_permits_deduction=True,
+        deduction_evidence="Attendance record",
+    )
+
+    result = calculate_billing_line(line)
+
+    assert result.exact_amount == Decimal("-1.005")
+    assert result.displayed_amount_pence == -101
