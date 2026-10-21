@@ -69,13 +69,17 @@ Run these commands from the repository root.
    python -m pip install -r requirements-dev.txt
    ```
 
-4. Run the automated tests:
+4. Run the automated checks:
 
    ```bash
+   python -m ruff check .
+   python -m ruff format --check .
    python -m pytest
    ```
 
-Development dependencies are declared in `requirements-dev.txt`. The initial test suite verifies that the application packages can be imported. Additional tests will be added as application features are implemented.
+   These commands check code quality, verify formatting without modifying files, and run the automated test suite, respectively. Run all three before submitting a pull request.
+
+Development dependencies are declared in `requirements-dev.txt`. The same checks run in GitHub Actions for pull requests and pushes to `main`. The initial test suite verifies that the application packages can be imported. Additional tests will be added as application features are implemented.
 
 ## Configuration and sensitive data
 
