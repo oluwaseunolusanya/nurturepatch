@@ -1,4 +1,3 @@
-
 """Tests for billing input validation and calculation rules."""
 
 from decimal import Decimal
@@ -10,9 +9,9 @@ from app.services.billing import (
     BillingLineInput,
     LineType,
     ServiceUnit,
-    validate_billing_line,
     calculate_billing_line,
     calculate_invoice,
+    validate_billing_line,
 )
 
 
@@ -245,7 +244,6 @@ def test_calculate_billing_line_rejects_invalid_input() -> None:
         calculate_billing_line(line)
 
 
-
 def test_calculate_invoice_rounds_aggregate_before_reconciling_lines() -> None:
     """Round the exact invoice subtotal before reconciling displayed lines."""
     lines = (
@@ -270,9 +268,7 @@ def test_calculate_invoice_rounds_aggregate_before_reconciling_lines() -> None:
     assert [line.displayed_amount_pence for line in result.lines] == [101, 101]
     assert result.rounding_adjustment_pence == -1
 
-    displayed_total = sum(
-        line.displayed_amount_pence for line in result.lines
-    )
+    displayed_total = sum(line.displayed_amount_pence for line in result.lines)
     assert displayed_total + result.rounding_adjustment_pence == result.total_pence
 
 
@@ -327,7 +323,6 @@ def test_calculate_invoice_rejects_invalid_line() -> None:
         match="quantity must be greater than zero",
     ):
         calculate_invoice(lines)
-
 
 
 def test_calculate_billing_line_rounds_below_half_penny_down() -> None:

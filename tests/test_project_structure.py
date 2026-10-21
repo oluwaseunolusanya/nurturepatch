@@ -1,4 +1,3 @@
-
 """Smoke tests for the initial application package structure."""
 
 import app

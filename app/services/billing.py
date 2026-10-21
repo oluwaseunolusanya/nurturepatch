@@ -1,4 +1,3 @@
-
 """Pure billing calculation models.
 
 This module contains the data structures used by the billing engine.
@@ -16,7 +15,7 @@ docs/decisions/0001-billing-money-and-rounding.md.
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum
 
 
@@ -113,7 +112,6 @@ def _require_decimal(value: Decimal, field_name: str) -> Decimal:
     return value
 
 
-
 def validate_billing_line(line: BillingLineInput) -> None:
     """Validate a billing line before calculating its monetary amount.
 
@@ -161,17 +159,10 @@ def validate_billing_line(line: BillingLineInput) -> None:
 
         if rate < 0:
             if not line.contract_permits_deduction:
-                raise BillingError(
-                    "deductions require explicit contract permission."
-                )
+                raise BillingError("deductions require explicit contract permission.")
 
-            if (
-                not line.deduction_evidence
-                or not line.deduction_evidence.strip()
-            ):
-                raise BillingError(
-                    "deductions require recorded supporting evidence."
-                )
+            if not line.deduction_evidence or not line.deduction_evidence.strip():
+                raise BillingError("deductions require recorded supporting evidence.")
 
         return
 
@@ -229,7 +220,6 @@ def calculate_billing_line(line: BillingLineInput) -> CalculatedLine:
     )
 
 
-
 def calculate_invoice(
     lines: Sequence[BillingLineInput],
 ) -> InvoiceCalculation:
@@ -254,10 +244,7 @@ def calculate_invoice(
     if not lines:
         raise BillingError("invoice must contain at least one billing line.")
 
-    calculated_lines = tuple(
-        calculate_billing_line(line)
-        for line in lines
-    )
+    calculated_lines = tuple(calculate_billing_line(line) for line in lines)
 
     exact_subtotal = sum(
         (line.exact_amount for line in calculated_lines),
@@ -271,13 +258,10 @@ def calculate_invoice(
     total_pence = int(rounded_total * 100)
 
     displayed_lines_total_pence = sum(
-        line.displayed_amount_pence
-        for line in calculated_lines
+        line.displayed_amount_pence for line in calculated_lines
     )
 
-    rounding_adjustment_pence = (
-        total_pence - displayed_lines_total_pence
-    )
+    rounding_adjustment_pence = total_pence - displayed_lines_total_pence
 
     return InvoiceCalculation(
         lines=calculated_lines,
