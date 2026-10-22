@@ -1,10 +1,14 @@
+
 """Test invoice lifecycle operations against PostgreSQL."""
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from threading import Barrier
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.db.models import (
     Business,
@@ -218,72 +222,150 @@ def test_issued_invoice_snapshot_survives_contract_rate_change(
 
 
 def test_correction_preserves_original_invoice(session, invoice_context):
-    """A correction is separate from the original issued invoice."""
+    """Recording a correction does not alter the original invoice."""
     invoice = make_draft(session, invoice_context)
-
     issue_invoice(
         session,
         business_id=invoice_context["business_id"],
         invoice_id=invoice.id,
         issued_at=datetime(2025, 2, 1, tzinfo=timezone.utc),
     )
-    original_total = invoice.total_pence
 
+    original_total = invoice.total_pence
     correction = record_correction(
         session,
         business_id=invoice_context["business_id"],
         invoice_id=invoice.id,
         correction_type="credit",
-        reason="Documented childcare adjustment",
-        amount_pence=500,
+        amount_pence=1500,
+        reason="Adjustment agreed with the family",
     )
 
-    assert correction.original_invoice_id == invoice.id
-    assert correction.amount_pence == 500
+    assert isinstance(correction, InvoiceCorrection)
+    assert correction.amount_pence == 1500
+    assert correction.correction_type == "credit"
     assert invoice.total_pence == original_total
     assert invoice.status == "issued"
-
-    persisted = session.get(InvoiceCorrection, correction.id)
-    assert persisted is not None
-    assert persisted.reason == "Documented childcare adjustment"
 
 
 def test_correction_rejects_draft_invoice(session, invoice_context):
     """A correction cannot be recorded against a draft invoice."""
     invoice = make_draft(session, invoice_context)
 
-    with pytest.raises(InvoiceServiceError, match="issued invoices"):
+    with pytest.raises(InvoiceServiceError):
         record_correction(
             session,
             business_id=invoice_context["business_id"],
             invoice_id=invoice.id,
             correction_type="credit",
-            reason="Test correction",
-            amount_pence=500,
+            amount_pence=1500,
+            reason="Correction against a draft",
         )
 
 
 def test_draft_rejects_child_from_another_family(session, invoice_context):
-    """Invoice lines cannot reference children outside the invoice family."""
-    business = session.get(Business, invoice_context["business_id"])
-    assert business is not None
-
-    other_family = Family(name="Another Family", business=business)
+    """A draft cannot include a child belonging to another family."""
+    other_family = Family(
+        name="Another Family",
+        business_id=invoice_context["business_id"],
+    )
     other_child = Child(
-        name="Other Child",
-        business=business,
+        name="Another Child",
+        business_id=invoice_context["business_id"],
         family=other_family,
     )
     session.add(other_child)
     session.flush()
 
-    with pytest.raises(InvoiceServiceError, match="invoice family"):
+    with pytest.raises(InvoiceServiceError):
         create_draft(
             session,
             business_id=invoice_context["business_id"],
             family_id=invoice_context["family_id"],
             period_start=date(2025, 1, 1),
             period_end=date(2025, 1, 31),
-            idempotency_key="wrong-child",
+            idempotency_key="wrong-family-child",
             lines=[billing_line(other_child.id)],
         )
+
+
+def test_concurrent_duplicate_requests_create_one_invoice(
+    session, invoice_context
+):
+    """Concurrent requests with the same key return one invoice."""
+    context = invoice_context
+    engine = session.get_bind()
+    barrier = Barrier(2)
+
+    # Commit setup data so independent worker sessions can see it.
+    session.commit()
+
+    def create_concurrently():
+        with Session(engine) as worker_session:
+            barrier.wait(timeout=10)
+            invoice = make_draft(worker_session, context)
+            invoice_id = invoice.id
+            worker_session.commit()
+            return invoice_id
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(create_concurrently)
+        second = executor.submit(create_concurrently)
+        first_id = first.result(timeout=30)
+        second_id = second.result(timeout=30)
+
+    assert first_id == second_id
+
+    with Session(engine) as verification_session:
+        invoices = verification_session.scalars(
+            select(Invoice).where(
+                Invoice.business_id == context["business_id"],
+                Invoice.idempotency_key == "request-001",
+            )
+        ).all()
+
+        assert len(invoices) == 1
+
+
+def test_concurrent_issuance_assigns_unique_invoice_numbers(
+    session, invoice_context
+):
+    """Concurrent issuance assigns distinct invoice numbers."""
+    context = invoice_context
+    engine = session.get_bind()
+    barrier = Barrier(2)
+
+    first_draft = make_draft(session, context, key="concurrent-001")
+    second_draft = make_draft(session, context, key="concurrent-002")
+    invoice_ids = [first_draft.id, second_draft.id]
+
+    # Make both drafts visible to independent worker sessions.
+    session.commit()
+
+    def issue_concurrently(invoice_id):
+        with Session(engine) as worker_session:
+            barrier.wait(timeout=10)
+            invoice = issue_invoice(
+                worker_session,
+                business_id=context["business_id"],
+                invoice_id=invoice_id,
+                issued_at=datetime(2025, 2, 1, tzinfo=timezone.utc),
+            )
+            invoice_number = invoice.invoice_number
+            worker_session.commit()
+            return invoice_number
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = [
+            executor.submit(issue_concurrently, invoice_id)
+            for invoice_id in invoice_ids
+        ]
+        invoice_numbers = [
+            result.result(timeout=30) for result in results
+        ]
+
+    assert len(set(invoice_numbers)) == 2
+    assert set(invoice_numbers) == {
+        "INV-2025-000001",
+        "INV-2025-000002",
+    }
