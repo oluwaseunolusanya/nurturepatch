@@ -37,3 +37,21 @@ jobs:
 
       - name: Run tests
         run: python -m pytest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: nurturepatch_test
+          POSTGRES_USER: nurturepatch_test
+          POSTGRES_PASSWORD: test_only_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nurturepatch_test -d nurturepatch_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://nurturepatch_test:test_only_password@localhost:5432/nurturepatch_test
