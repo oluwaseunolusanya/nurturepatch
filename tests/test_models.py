@@ -1,4 +1,3 @@
-
 """Test database model relationships and tenant isolation."""
 
 import os

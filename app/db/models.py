@@ -1,4 +1,3 @@
-
 """Define business, family, child, and childcare contract database models."""
 
 from datetime import date
