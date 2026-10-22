@@ -1,4 +1,3 @@
-
 """Manage invoice drafts, issuance, idempotency, and corrections.
 
 This service coordinates database persistence with the pure billing engine.
@@ -55,9 +54,7 @@ def _normalise_child_id(child_id: str | None) -> int | None:
     try:
         result = int(child_id)
     except (TypeError, ValueError) as exc:
-        raise InvoiceServiceError(
-            "child_id must be a valid integer ID."
-        ) from exc
+        raise InvoiceServiceError("child_id must be a valid integer ID.") from exc
 
     if result <= 0 or str(result) != child_id:
         raise InvoiceServiceError("child_id must be a positive integer ID.")
@@ -106,8 +103,7 @@ def _validate_scope(
         )
         if child is None:
             raise InvoiceServiceError(
-                "Every invoice child must belong to the invoice family "
-                "and business."
+                "Every invoice child must belong to the invoice family and business."
             )
 
 
@@ -246,24 +242,18 @@ def create_draft(
         IdempotencyConflict: If the key belongs to a different request.
     """
     if period_end < period_start:
-        raise InvoiceServiceError(
-            "period_end must not precede period_start."
-        )
+        raise InvoiceServiceError("period_end must not precede period_start.")
 
     if not idempotency_key or not idempotency_key.strip():
         raise InvoiceServiceError("idempotency_key must not be empty.")
 
     if len(idempotency_key) > 200:
-        raise InvoiceServiceError(
-            "idempotency_key exceeds 200 characters."
-        )
+        raise InvoiceServiceError("idempotency_key exceeds 200 characters.")
 
     # Acquire the same tenant-level lock used by invoice issuance.
     # PostgreSQL holds this lock until the transaction ends.
     business = session.scalar(
-        select(Business)
-        .where(Business.id == business_id)
-        .with_for_update()
+        select(Business).where(Business.id == business_id).with_for_update()
     )
     if business is None:
         raise InvoiceServiceError("Business not found.")
@@ -385,9 +375,7 @@ def issue_invoice(
             timestamp is invalid.
     """
     business = session.scalar(
-        select(Business)
-        .where(Business.id == business_id)
-        .with_for_update()
+        select(Business).where(Business.id == business_id).with_for_update()
     )
 
     if business is None:
@@ -475,25 +463,19 @@ def record_correction(
             field is invalid.
     """
     if correction_type not in {"credit", "correction"}:
-        raise InvoiceServiceError(
-            "correction_type must be 'credit' or 'correction'."
-        )
+        raise InvoiceServiceError("correction_type must be 'credit' or 'correction'.")
 
     if not reason or not reason.strip():
         raise InvoiceServiceError("A correction reason is required.")
 
     if len(reason) > 500:
-        raise InvoiceServiceError(
-            "Correction reason exceeds 500 characters."
-        )
+        raise InvoiceServiceError("Correction reason exceeds 500 characters.")
 
     if isinstance(amount_pence, bool) or not isinstance(amount_pence, int):
         raise InvoiceServiceError("amount_pence must be an integer.")
 
     if amount_pence <= 0:
-        raise InvoiceServiceError(
-            "amount_pence must be greater than zero."
-        )
+        raise InvoiceServiceError("amount_pence must be greater than zero.")
 
     invoice = session.scalar(
         select(Invoice)
@@ -515,9 +497,7 @@ def record_correction(
     timestamp = created_at or datetime.now(timezone.utc)
 
     if timestamp.tzinfo is None or timestamp.utcoffset() is None:
-        raise InvoiceServiceError(
-            "created_at must be timezone-aware."
-        )
+        raise InvoiceServiceError("created_at must be timezone-aware.")
 
     correction = InvoiceCorrection(
         business_id=business_id,

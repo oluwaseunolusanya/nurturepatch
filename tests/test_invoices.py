@@ -1,4 +1,3 @@
-
 """Test invoice lifecycle operations against PostgreSQL."""
 
 from concurrent.futures import ThreadPoolExecutor
@@ -289,9 +288,7 @@ def test_draft_rejects_child_from_another_family(session, invoice_context):
         )
 
 
-def test_concurrent_duplicate_requests_create_one_invoice(
-    session, invoice_context
-):
+def test_concurrent_duplicate_requests_create_one_invoice(session, invoice_context):
     """Concurrent requests with the same key return one invoice."""
     context = invoice_context
     engine = session.get_bind()
@@ -327,9 +324,7 @@ def test_concurrent_duplicate_requests_create_one_invoice(
         assert len(invoices) == 1
 
 
-def test_concurrent_issuance_assigns_unique_invoice_numbers(
-    session, invoice_context
-):
+def test_concurrent_issuance_assigns_unique_invoice_numbers(session, invoice_context):
     """Concurrent issuance assigns distinct invoice numbers."""
     context = invoice_context
     engine = session.get_bind()
@@ -360,9 +355,7 @@ def test_concurrent_issuance_assigns_unique_invoice_numbers(
             executor.submit(issue_concurrently, invoice_id)
             for invoice_id in invoice_ids
         ]
-        invoice_numbers = [
-            result.result(timeout=30) for result in results
-        ]
+        invoice_numbers = [result.result(timeout=30) for result in results]
 
     assert len(set(invoice_numbers)) == 2
     assert set(invoice_numbers) == {

@@ -1,4 +1,3 @@
-
 """Add invoice lifecycle models.
 
 Revision ID: fa12e9c34658
