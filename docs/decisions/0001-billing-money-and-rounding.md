@@ -87,6 +87,8 @@ The confirmed business rule is **aggregate-first rounding**.
 
 Do not replace this policy with line-by-line rounding before aggregation.
 
+For exact halfway values, `ROUND_HALF_UP` rounds away from zero. For example, when rounded to two decimal places, £1.005 becomes £1.01 and −£1.005 becomes −£1.01. This rule applies to the final aggregate invoice amount and does not change the aggregate-first rounding policy.
+
 ### Example
 
 Two lines each calculate to £1.005.
